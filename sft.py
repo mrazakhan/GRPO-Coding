@@ -20,6 +20,10 @@ if len(kept) < 5:
                      "time" % (len(kept), TRAJ))
 print("training on %d trajectories from %s" % (len(kept), TRAJ), flush=True)
 
+MAX_SEQ = int(os.environ.get("MAX_SEQ", "20480"))  # prompts carry
+# whole source files plus the grader's failing output — 4096 truncates
+# them mid-prompt, silently
+
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
@@ -27,10 +31,11 @@ from datasets import Dataset
 
 model, tok = FastLanguageModel.from_pretrained(
     os.environ.get("BASE_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
-    max_seq_length=4096, load_in_4bit=True)
+    max_seq_length=MAX_SEQ, load_in_4bit=True)
 model = FastLanguageModel.get_peft_model(model, r=16, lora_alpha=16,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj"])
+                    "gate_proj", "up_proj", "down_proj"],
+    use_gradient_checkpointing="unsloth")   # long rows on a 24GB card
 tok = get_chat_template(tok, chat_template="qwen-2.5")
 
 rows = [{"text": tok.apply_chat_template(
@@ -40,7 +45,8 @@ rows = [{"text": tok.apply_chat_template(
         for t in kept]
 trainer = SFTTrainer(model=model, processing_class=tok,
     train_dataset=Dataset.from_list(rows),
-    args=SFTConfig(per_device_train_batch_size=1, gradient_accumulation_steps=8,
+    args=SFTConfig(max_length=MAX_SEQ,   # TRL's own row cap — defaults low
+                   per_device_train_batch_size=1, gradient_accumulation_steps=8,
                    num_train_epochs=3, learning_rate=2e-4,
                    output_dir="sft-ckpt"))
 trainer = train_on_responses_only(trainer)   # mask the prompt out of the loss

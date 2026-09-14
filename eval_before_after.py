@@ -51,6 +51,10 @@ def print_table():
               r["pass_rate"], r["mean_tokens"], r.get("ckpt_mtime", ""),
               r.get("label", "")))
 
+MAX_SEQ = int(os.environ.get("MAX_SEQ", "20480"))  # prompts carry
+# whole source files plus the grader's failing output — 4096 truncates
+# them mid-prompt, silently
+
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 
@@ -69,7 +73,7 @@ for ckpt in CKPTS:
         print("%s: not found, skipping (train it first)" % ckpt, flush=True)
         continue
     model, tok = FastLanguageModel.from_pretrained(
-        ckpt, max_seq_length=4096, load_in_4bit=True)
+        ckpt, max_seq_length=MAX_SEQ, load_in_4bit=True)
     tok = get_chat_template(tok, chat_template="qwen-2.5")
     FastLanguageModel.for_inference(model)
     for split in SPLITS:
