@@ -44,12 +44,12 @@ def print_table():
     latest = {}
     for r in rows:                       # last measurement per (ckpt, split)
         latest[(r["ckpt"], r["split"])] = r
-    print("\n%-40s %-22s %-10s %-8s %s" % ("checkpoint", "split",
-          "pass rate", "tokens", "trained at / label"))
+    print("\n%-38s %-20s %-6s %-11s %-7s %s" % ("checkpoint", "split",
+          "pass", "mean-credit", "tokens", "trained at / label"))
     for (ckpt, split), r in latest.items():
-        print("%-40s %-22s %-10.2f %-8.0f %s %s" % (ckpt, split,
-              r["pass_rate"], r["mean_tokens"], r.get("ckpt_mtime", ""),
-              r.get("label", "")))
+        print("%-38s %-20s %-6.2f %-11.3f %-7.0f %s %s" % (ckpt, split,
+              r["pass_rate"], r.get("mean_credit", 0.0), r["mean_tokens"],
+              r.get("ckpt_mtime", ""), r.get("label", "")))
 
 MAX_SEQ = int(os.environ.get("MAX_SEQ", "20480"))  # prompts carry
 # whole source files plus the grader's failing output — 4096 truncates
@@ -77,12 +77,14 @@ for ckpt in CKPTS:
     tok = get_chat_template(tok, chat_template="qwen-2.5")
     FastLanguageModel.for_inference(model)
     for split in SPLITS:
-        rates, lengths = [], []
+        rates, partials, lengths = [], [], []
         for task in json.load(open(split)):
             rolls = [sample(model, tok, task) for _ in range(ROLLS)]
             diffs = [mt.extract_diff(r) for r in rolls]
-            rates.append(mean(d is not None and mt.grade(task, d) == 1.0
-                              for d in diffs))
+            credits = [mt.grade(task, d) if d is not None else 0.0
+                       for d in diffs]                 # fraction of grader
+            rates.append(mean(c == 1.0 for c in credits))    # full solves
+            partials.append(mean(credits))              # partial progress
             lengths.append(mean(len(tok.encode(r)) for r in rolls))
         row = {"ckpt": ckpt, "split": split, "rolls": ROLLS,
                "label": os.environ.get("EVAL_LABEL", ""),
@@ -90,12 +92,13 @@ for ckpt in CKPTS:
                               time.localtime(os.path.getmtime(ckpt)))
                               if os.path.exists(ckpt) else "hub"),
                "pass_rate": round(mean(rates), 3),
+               "mean_credit": round(mean(partials), 3),
                "mean_tokens": round(mean(lengths), 1),
                "at": time.strftime("%Y-%m-%d %H:%M:%S")}
         record(row)
-        print("%-40s %-22s pass rate %.2f  mean output tokens %.0f"
-              % (ckpt, split, row["pass_rate"], row["mean_tokens"]),
-              flush=True)
+        print("%-40s %-22s pass %.2f  mean-credit %.3f  tokens %.0f"
+              % (ckpt, split, row["pass_rate"], row["mean_credit"],
+                 row["mean_tokens"]), flush=True)
 
 print_table()
 print("\nrows saved to %s" % RESULTS)
