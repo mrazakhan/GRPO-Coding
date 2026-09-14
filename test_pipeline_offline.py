@@ -14,7 +14,7 @@ def fake_urlopen_factory(payload):
 
 def load_module_without_running(path):
     src = open(path).read()
-    src = src.split("\nTASKS = json.load")[0]   # defs only, not the run
+    src = src.split('\nif not os.path.exists("tasks.json")')[0]  # defs only
     mod = types.ModuleType("mt")
     mod.extract_diff = None
     exec(compile(src, path, "exec"), mod.__dict__)

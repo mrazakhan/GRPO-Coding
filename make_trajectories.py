@@ -1,5 +1,8 @@
 '''Step 3: teacher trajectories — assembled from the lesson's step 5 (reward helpers)
-and step 3 (OpenRouter pipeline). Run from /workspace after mine_tasks.py.'''
+and step 3 (OpenRouter pipeline). Run from /workspace after mine_tasks.py.
+Env: OPENROUTER_API_KEY (required), TEACHER_MODEL, WORKERS, LOG_LEVEL=DEBUG for
+reply snippets on failures.'''
+
 import os, re, subprocess, tempfile
 
 FENCE = chr(96) * 3   # a triple-backtick string; write the literal in your file
@@ -53,6 +56,13 @@ from threading import Lock
 TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "google/gemini-3.8-flash")
 WORKERS = int(os.environ.get("WORKERS", "3"))
 OUT_DIR = os.path.join("runs", TEACHER_MODEL.replace("/", "-"))
+
+import logging
+import time
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
+                    format="%(asctime)s %(levelname)s %(message)s",
+                    datefmt="%H:%M:%S")
+LOG = logging.getLogger("trajectories")
 grade_lock = Lock()
 progress_lock = Lock()
 done = []
@@ -67,11 +77,31 @@ def teacher(prompt):
                         ).encode(),
         headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
                  "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
-        data = json.load(r)
-    message = data["choices"][0]["message"]
-    return (message.get("content") or "",   # reasoning models can send null
-            data.get("model", TEACHER_MODEL))
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        body = e.read()[:300]
+        if e.code in (401, 403):
+            raise SystemExit("API auth failed (%d): %s — check "
+                             "OPENROUTER_API_KEY" % (e.code, body))
+        LOG.warning("API error %d, treating as failed attempt: %s",
+                    e.code, body)
+        time.sleep(5)
+        return "", TEACHER_MODEL
+    except urllib.error.URLError as e:
+        LOG.warning("network error, treating as failed attempt: %s", e.reason)
+        time.sleep(5)
+        return "", TEACHER_MODEL
+    choice = data["choices"][0]
+    finish = choice.get("finish_reason")
+    if finish not in (None, "stop"):
+        LOG.warning("finish_reason=%s — reply may be truncated "
+                    "(reasoning tokens eating the budget?)", finish)
+    text = choice["message"].get("content") or ""  # reasoning models: null
+    LOG.debug("API %.1fs, %d chars", time.time() - t0, len(text))
+    return text, data.get("model", TEACHER_MODEL)
 
 def show(task, path):
     """A file's contents at the task's defect state — never the working tree."""
@@ -91,13 +121,21 @@ def solve(task):
         diff = extract_diff(reply)
         if not reply:
             reason = "empty reply"
+            LOG.info("%s attempt %d: empty reply", task["id"], attempt + 1)
             continue
         if not diff:
             reason = "no diff fence"
+            LOG.info("%s attempt %d: %d chars, no diff fence",
+                     task["id"], attempt + 1, len(reply))
+            LOG.debug("reply head: %r", reply[:200])
             continue
+        t0 = time.time()
         with grade_lock:                       # serialized: touches the repo
             credit = grade(task, diff)
         reason = "credit %.2f" % credit        # 0.00 usually: diff not applying
+        LOG.info("%s attempt %d: %d chars, diff %d lines, credit %.2f "
+                 "(grade %.1fs)", task["id"], attempt + 1, len(reply),
+                 len(diff.splitlines()), credit, time.time() - t0)
         if credit == 1.0:
             row = {"task": task["id"], "teacher": served_by,
                    "prompt": build_prompt(task), "completion": reply}
@@ -109,7 +147,17 @@ def solve(task):
               else "gave up (last: %s)" % reason), flush=True)
     return row
 
+if not os.path.exists("tasks.json"):
+    raise SystemExit("tasks.json not found in %s — run mine_tasks.py first, "
+                     "or symlink the file here" % os.getcwd())
 TASKS = json.load(open("tasks.json"))
+missing = sorted({t["repo"] for t in TASKS if not os.path.isdir(t["repo"])})
+if missing:
+    raise SystemExit("task repo path(s) do not exist: %s — fix the repo "
+                     "field in tasks.json" % ", ".join(missing))
+LOG.info("teacher=%s workers=%d tasks=%d out=%s",
+         TEACHER_MODEL, WORKERS, len(TASKS), OUT_DIR)
+run_t0 = time.time()
 with ThreadPoolExecutor(max_workers=WORKERS) as pool:
     kept = [r for r in pool.map(solve, TASKS) if r]
 
@@ -118,3 +166,11 @@ out_path = os.path.join(OUT_DIR, "trajectories.json")
 with open(out_path, "w") as f:
     json.dump(kept, f)
 print(len(kept), "trajectories written to", out_path)
+LOG.info("kept %d/%d (%.0f%%) in %.1f min", len(kept), len(TASKS),
+         100.0 * len(kept) / max(len(TASKS), 1),
+         (time.time() - run_t0) / 60)
+teachers = {}
+for row in kept:
+    teachers[row["teacher"]] = teachers.get(row["teacher"], 0) + 1
+for name, count in sorted(teachers.items()):
+    LOG.info("  served by %s: %d", name, count)
