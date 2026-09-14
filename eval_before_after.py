@@ -44,11 +44,12 @@ def print_table():
     latest = {}
     for r in rows:                       # last measurement per (ckpt, split)
         latest[(r["ckpt"], r["split"])] = r
-    print("\n%-40s %-22s %-10s %s" % ("checkpoint", "split", "pass rate",
-                                       "mean output tokens"))
+    print("\n%-40s %-22s %-10s %-8s %s" % ("checkpoint", "split",
+          "pass rate", "tokens", "trained at / label"))
     for (ckpt, split), r in latest.items():
-        print("%-40s %-22s %-10.2f %.0f" % (ckpt, split, r["pass_rate"],
-                                            r["mean_tokens"]))
+        print("%-40s %-22s %-10.2f %-8.0f %s %s" % (ckpt, split,
+              r["pass_rate"], r["mean_tokens"], r.get("ckpt_mtime", ""),
+              r.get("label", "")))
 
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
@@ -80,6 +81,10 @@ for ckpt in CKPTS:
                               for d in diffs))
             lengths.append(mean(len(tok.encode(r)) for r in rolls))
         row = {"ckpt": ckpt, "split": split, "rolls": ROLLS,
+               "label": os.environ.get("EVAL_LABEL", ""),
+               "ckpt_mtime": (time.strftime("%Y-%m-%d %H:%M:%S",
+                              time.localtime(os.path.getmtime(ckpt)))
+                              if os.path.exists(ckpt) else "hub"),
                "pass_rate": round(mean(rates), 3),
                "mean_tokens": round(mean(lengths), 1),
                "at": time.strftime("%Y-%m-%d %H:%M:%S")}
