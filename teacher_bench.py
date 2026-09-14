@@ -4,12 +4,20 @@ failure reasons side by side. The five-task protocol as one command.
   BENCH_MODELS="google/gemini-3.8-flash,anthropic/claude-sonnet-4.5" \
   BENCH_TASKS=5 python teacher_bench.py
 
-Verify each id on openrouter.ai/models. Needs OPENROUTER_API_KEY and the
-same working directory as make_trajectories.py (tasks.json + the clone).
+Models run in parallel, one thread each; every model writes its full
+attempt log to runs/bench/<model-slug>.log, and the console shows one
+prefixed line per finished task. Grading is serialized across models
+(git worktrees on the one clone collide). Verify each id on
+openrouter.ai/models. Needs OPENROUTER_API_KEY and the same working
+directory as make_trajectories.py (tasks.json + the clone).
 """
+import builtins
 import json
+import logging
 import os
+import threading
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 MODELS = [m.strip() for m in os.environ.get(
     "BENCH_MODELS",
@@ -24,21 +32,47 @@ def load_defs():
     return mod
 
 tasks = json.load(open("tasks.json"))[:N]
-results = {}
-for model in MODELS:
+os.makedirs(os.path.join("runs", "bench"), exist_ok=True)
+shared_grade_lock = threading.Lock()   # one clone, one grader at a time
+console_lock = threading.Lock()
+
+def bench_one(model):
+    slug = model.replace("/", "-")
     mod = load_defs()
     mod.TEACHER_MODEL = model
     mod.TASKS, mod.done, mod.BAR = tasks, [], None
-    print("\n=== %s ===" % model, flush=True)
-    kept, reasons = 0, {}
+    mod.grade_lock = shared_grade_lock
+
+    log = logging.getLogger("bench." + slug)
+    log.setLevel(logging.DEBUG)
+    log.propagate = False                # this model's file only
+    handler = logging.FileHandler(os.path.join("runs", "bench", slug + ".log"),
+                                  mode="w")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+    log.handlers[:] = [handler]
+    mod.LOG = log
+
+    def console(*args, **kwargs):        # solve()'s progress line, prefixed
+        with console_lock:
+            builtins.print("[%s]" % slug, *args, flush=True)
+    mod.print = console
+
+    kept = 0
     for task in tasks:
-        row = mod.solve(task)
-        if row:
+        if mod.solve(task):
             kept += 1
-    results[model] = kept
+    handler.close()
+    return model, kept
+
+print("Benching %d models on %d tasks; logs in runs/bench/" % (len(MODELS), N),
+      flush=True)
+with ThreadPoolExecutor(max_workers=len(MODELS)) as pool:
+    results = dict(pool.map(bench_one, MODELS))
 
 print("\n%-45s %s" % ("model", "kept/%d" % N))
-for model, kept in results.items():
+for model in MODELS:
+    kept = results[model]
     print("%-45s %d  %s" % (model, kept,
           "<- viable" if kept * 5 >= N * 3 else ""))
 print("\nRule: 3+ of 5 kept means the teacher is viable for the full run.")
