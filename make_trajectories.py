@@ -22,9 +22,10 @@ def grade(task, diff):
         subprocess.run(["git", "worktree", "add", "--detach", workdir,
                         task["branch"]], cwd=task["repo"],
                        check=True, capture_output=True)
-        for extra in ([], ["--recount"], ["--3way"]):
+        patch = (diff.rstrip("\n") + "\n").encode()  # git apply requires the
+        for extra in ([], ["--recount"], ["--3way"]):    # final newline
             applied = subprocess.run(["git", "-C", workdir, "apply"] + extra
-                                     + ["-"], input=diff.encode(),
+                                     + ["-"], input=patch,
                                      capture_output=True)
             if applied.returncode == 0:
                 if extra:

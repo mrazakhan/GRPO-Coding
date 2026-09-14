@@ -55,4 +55,28 @@ urllib.request.urlopen = capturing_urlopen
 mt.teacher("prompt")
 assert captured.get("max_tokens", 0) >= 8192, captured
 
-print("4 offline seam tests pass")
+# 5. grade feeds git apply a patch WITH a final newline — extract_diff
+# strips it, and git rejects a patch without one ("corrupt patch at
+# line N" on every attempt of a real bench run). Negative control: the
+# stripped diff itself really does lack the newline.
+stripped = mt.extract_diff(reply)
+assert not stripped.endswith("\n")
+seen = {}
+class FakeCompleted:
+    returncode = 0
+    stdout = "1 passed"
+    stderr = b""
+def fake_run(cmd, **kwargs):
+    if "apply" in cmd:
+        seen["patch"] = kwargs["input"]
+    return FakeCompleted()
+real_run = mt.subprocess.run
+mt.subprocess = types.SimpleNamespace(run=fake_run,
+                                      TimeoutExpired=Exception)
+mt.grade({"id": "t", "repo": ".", "branch": "b", "grader": "pytest x"},
+         stripped)
+mt.subprocess = types.SimpleNamespace(run=real_run,
+                                      TimeoutExpired=Exception)
+assert seen["patch"].endswith(b"\n"), seen
+
+print("5 offline seam tests pass")
