@@ -39,6 +39,34 @@ def remap_paths(diff, task):
         out.append(line)
     return "\n".join(out)
 
+def recount_hunks(diff):
+    """Rewrite each @@ header's line counts from the hunk's actual body —
+    models overstate them, and GNU patch has no --recount of its own."""
+    out, header, hunk = [], None, []
+    def flush():
+        nonlocal header, hunk
+        if header is None:
+            return
+        old = sum(1 for l in hunk if l[:1] in (" ", "-") or l == "")
+        new = sum(1 for l in hunk if l[:1] in (" ", "+") or l == "")
+        m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$", header)
+        out.append("@@ -%s,%d +%s,%d @@%s" % (m.group(1), old, m.group(2),
+                                              new, m.group(3)))
+        out.extend(l if l else " " for l in hunk)
+        header, hunk = None, []
+    for line in diff.splitlines():
+        if re.match(r"^@@ -\d", line):
+            flush(); header = line
+        elif header is not None:
+            if line[:1] in (" ", "-", "+", "\\") or line == "":
+                hunk.append(line)
+            else:
+                flush(); out.append(line)
+        else:
+            out.append(line)
+    flush()
+    return "\n".join(out)
+
 def restore_blank_context(diff):
     """Blank context lines inside hunks need their leading space back —
     models emit them truly empty, and git apply calls that corrupt."""
@@ -68,7 +96,8 @@ def grade(task, diff):
         for text in variants:                # git apply requires the
             patch = (text.rstrip("\n") + "\n").encode()  # final newline
             for extra in ([], ["--recount"], ["--3way"]):
-                applied = subprocess.run(["git", "-C", workdir, "apply"]
+                applied = subprocess.run(["git", "-C", workdir, "apply",
+                                          "--whitespace=nowarn"]
                                          + extra + ["-"], input=patch,
                                          capture_output=True)
                 if applied.returncode == 0:
@@ -78,15 +107,25 @@ def grade(task, diff):
                     break
             if applied.returncode == 0:
                 break
+        if applied.returncode != 0:          # last resort: recount + fuzz
+            patch = (recount_hunks(variants[2]).rstrip("\n") + "\n").encode()
+            applied = subprocess.run(["patch", "-p1", "--fuzz=3", "--batch",
+                                      "--forward", "-d", workdir],
+                                     input=patch, capture_output=True)
+            if applied.returncode == 0:
+                LOG.debug("%s: patch needed recount + fuzz", task["id"])
         if applied.returncode != 0:          # gate: the patch did not apply
             LOG.info("%s: patch rejected by git apply: %s", task["id"],
-                     applied.stderr.decode(errors="replace").strip()[:200])
+                     (applied.stderr or applied.stdout).decode(errors="replace").strip()[:400])
             return 0.0
-        out = subprocess.run(task["grader"].split() + ["--tb=no"],
+        out = subprocess.run(task["grader"].split() + ["--tb=short"],
                              cwd=workdir, capture_output=True, text=True,
                              env={**os.environ, "PYTHONPATH": workdir},
                              timeout=120).stdout
-        last_test_output[task["id"]] = out[-1500:]
+        keep = [l for l in out.splitlines()
+                if l.startswith(("E ", "E\t", "_ ", "SUBFAIL", "FAILED"))
+                or " passed" in l or " failed" in l]
+        last_test_output[task["id"]] = ("\n".join(keep) or out)[-3000:]
         passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", out)) else 0
         failed = int(m.group(1)) if (m := re.search(r"(\d+) failed", out)) else 0
         if passed + failed == 0:             # gate: no test ever executed
@@ -204,7 +243,7 @@ def failing_output(task):
         finally:
             subprocess.run(["git", "worktree", "remove", "--force", workdir],
                            cwd=task["repo"], capture_output=True)
-    fail_cache[task["id"]] = out[-2500:]
+    fail_cache[task["id"]] = out[-4000:]
     return fail_cache[task["id"]]
 
 def build_prompt(task):
@@ -217,9 +256,11 @@ def build_prompt(task):
             "exactly the file paths shown above (relative to the "
             "repository root).")
 
+ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
+
 def solve(task):
     row, reason, feedback = None, "no reply", ""
-    for attempt in range(3):
+    for attempt in range(ATTEMPTS):
         reply, served_by = teacher(build_prompt(task) + feedback)
         diff = extract_diff(reply)
         if not reply:
