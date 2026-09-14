@@ -11,6 +11,7 @@ clone with its task branches, and requirements-gpu.txt.
 """
 import json
 import os
+import time
 import types
 from statistics import mean
 
@@ -28,6 +29,26 @@ CKPTS = [c.strip() for c in os.environ.get(
 SPLITS = [s.strip() for s in os.environ.get(
     "SPLITS", "heldout_yours.json").split(",") if s.strip()]
 ROLLS = int(os.environ.get("ROLLS", "10"))
+
+RESULTS = os.path.join("runs", "eval", "results.jsonl")
+
+def record(row):
+    """Append one measured row; the table accumulates across invocations
+    (the base row from an earlier run stays)."""
+    os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
+    with open(RESULTS, "a") as f:
+        f.write(json.dumps(row) + "\n")
+
+def print_table():
+    rows = [json.loads(l) for l in open(RESULTS)] if os.path.exists(RESULTS) else []
+    latest = {}
+    for r in rows:                       # last measurement per (ckpt, split)
+        latest[(r["ckpt"], r["split"])] = r
+    print("\n%-40s %-22s %-10s %s" % ("checkpoint", "split", "pass rate",
+                                       "mean output tokens"))
+    for (ckpt, split), r in latest.items():
+        print("%-40s %-22s %-10.2f %.0f" % (ckpt, split, r["pass_rate"],
+                                            r["mean_tokens"]))
 
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
@@ -58,5 +79,14 @@ for ckpt in CKPTS:
             rates.append(mean(d is not None and mt.grade(task, d) == 1.0
                               for d in diffs))
             lengths.append(mean(len(tok.encode(r)) for r in rolls))
+        row = {"ckpt": ckpt, "split": split, "rolls": ROLLS,
+               "pass_rate": round(mean(rates), 3),
+               "mean_tokens": round(mean(lengths), 1),
+               "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        record(row)
         print("%-40s %-22s pass rate %.2f  mean output tokens %.0f"
-              % (ckpt, split, mean(rates), mean(lengths)), flush=True)
+              % (ckpt, split, row["pass_rate"], row["mean_tokens"]),
+              flush=True)
+
+print_table()
+print("\nrows saved to %s" % RESULTS)
