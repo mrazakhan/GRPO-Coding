@@ -55,7 +55,7 @@ WORKERS = int(os.environ.get("WORKERS", "3"))
 grade_lock = Lock()
 
 def teacher(prompt):
-    """One chat completion from the teacher model, via OpenRouter."""
+    """One chat completion via OpenRouter -> (text, model that served it)."""
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps({"model": TEACHER_MODEL,
@@ -64,7 +64,9 @@ def teacher(prompt):
         headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
                  "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
-        return json.load(r)["choices"][0]["message"]["content"]
+        data = json.load(r)
+    return (data["choices"][0]["message"]["content"],
+            data.get("model", TEACHER_MODEL))
 
 def show(task, path):
     """A file's contents at the task's defect state — never the working tree."""
@@ -79,12 +81,13 @@ def build_prompt(task):
 
 def solve(task):
     for attempt in range(3):
-        reply = teacher(build_prompt(task))    # parallel: pure waiting
-        diff = extract_diff(reply)             # step 5 defines both
+        reply, served_by = teacher(build_prompt(task))  # parallel: pure waiting
+        diff = extract_diff(reply)
         with grade_lock:                       # serialized: touches the repo
             ok = diff and grade(task, diff) == 1.0
         if ok:
-            return {"prompt": build_prompt(task), "completion": reply}
+            return {"task": task["id"], "teacher": served_by,
+                    "prompt": build_prompt(task), "completion": reply}
     return None
 
 with ThreadPoolExecutor(max_workers=WORKERS) as pool:
