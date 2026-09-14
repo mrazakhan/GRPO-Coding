@@ -36,3 +36,14 @@ step; this directory is the runnable form.
 Steps 4-6 (SFT, GRPO, the before/after table) are in the lesson; both
 their code and the substitutions to `grpo_mbpp.py` (in the course practice repository)
 are documented there.
+
+## Troubleshooting
+
+- `RuntimeError: The NVIDIA driver on your system is too old` on the first
+  unsloth import: the GPU requirements install pulled a torch wheel built for
+  a newer CUDA than the machine's driver. Reinstall torch for the driver's
+  CUDA version (shown in `nvidia-smi`, e.g. 12.8):
+  `pip install --force-reinstall --index-url https://download.pytorch.org/whl/cu128 torch`
+  then verify with `python -c "import torch; print(torch.cuda.is_available())"`.
+  vllm may warn about the torch version — it is unused by sft.py and
+  eval_before_after.py.

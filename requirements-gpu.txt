@@ -1,4 +1,7 @@
 # Steps 4-6 (CUDA machine only): SFT, GRPO, evaluation.
 # Unsloth pins its own compatible torch/trl/transformers set on install.
+# If the install upgrades torch past your driver ("The NVIDIA driver on your
+# system is too old" at import), reinstall torch for your CUDA version, e.g.:
+#   pip install --force-reinstall --index-url https://download.pytorch.org/whl/cu128 torch
 unsloth
 vllm
