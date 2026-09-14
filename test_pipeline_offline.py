@@ -73,8 +73,8 @@ def fake_run(cmd, **kwargs):
 real_run = mt.subprocess.run
 mt.subprocess = types.SimpleNamespace(run=fake_run,
                                       TimeoutExpired=Exception)
-mt.grade({"id": "t", "repo": ".", "branch": "b", "grader": "pytest x"},
-         stripped)
+mt.grade({"id": "t", "repo": ".", "branch": "b", "grader": "pytest x",
+          "files": ["a/x"]}, stripped)
 mt.subprocess = types.SimpleNamespace(run=real_run,
                                       TimeoutExpired=Exception)
 assert seen["patch"].endswith(b"\n"), seen

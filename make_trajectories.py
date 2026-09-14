@@ -15,6 +15,23 @@ def extract_diff(text):
     end = text.find(FENCE, start)
     return None if end < 0 else text[start:end].strip("\n")
 
+def remap_paths(diff, task):
+    """Models drop directory prefixes ('transforms.py' for
+    'sqlglot/transforms.py'); the task names its files, so a header whose
+    basename matches exactly one of them is rewritten to the full path."""
+    names = {}
+    for f in task["files"]:
+        names.setdefault(os.path.basename(f), []).append(f)
+    out = []
+    for line in diff.splitlines():
+        m = re.match(r"^(--- |\+\+\+ )([ab]/)?(.+)$", line)
+        if m and m.group(3) != "/dev/null" and m.group(3) not in task["files"]:
+            full = names.get(os.path.basename(m.group(3).strip()))
+            if full and len(full) == 1:
+                line = m.group(1) + (m.group(2) or "") + full[0]
+        out.append(line)
+    return "\n".join(out)
+
 def restore_blank_context(diff):
     """Blank context lines inside hunks need their leading space back —
     models emit them truly empty, and git apply calls that corrupt."""
@@ -29,14 +46,18 @@ def restore_blank_context(diff):
         out.append(line)
     return "\n".join(out)
 
+last_test_output = {}
+
 def grade(task, diff):
     """Per-test credit in [0, 1]; 0.0 whenever the grader never ran."""
+    last_test_output[task["id"]] = ""
     workdir = tempfile.mkdtemp()
     try:
         subprocess.run(["git", "worktree", "add", "--detach", workdir,
                         task["branch"]], cwd=task["repo"],
                        check=True, capture_output=True)
         variants = [diff, restore_blank_context(diff)]
+        variants.append(remap_paths(variants[1], task))
         for text in variants:                # git apply requires the
             patch = (text.rstrip("\n") + "\n").encode()  # final newline
             for extra in ([], ["--recount"], ["--3way"]):
@@ -58,6 +79,7 @@ def grade(task, diff):
                              cwd=workdir, capture_output=True, text=True,
                              env={**os.environ, "PYTHONPATH": workdir},
                              timeout=120).stdout
+        last_test_output[task["id"]] = out[-1500:]
         passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", out)) else 0
         failed = int(m.group(1)) if (m := re.search(r"(\d+) failed", out)) else 0
         if passed + failed == 0:             # gate: no test ever executed
@@ -154,18 +176,44 @@ def show(task, path):
                            task["branch"] + ":" + path],
                           capture_output=True, text=True).stdout
 
+fail_cache = {}
+def failing_output(task):
+    """The grader's output at the unpatched defect state — what the fix
+    must repair. Cached; the teacher sees the target, not just the ask."""
+    if task["id"] in fail_cache:
+        return fail_cache[task["id"]]
+    with grade_lock:
+        workdir = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "worktree", "add", "--detach", workdir,
+                            task["branch"]], cwd=task["repo"],
+                           check=True, capture_output=True)
+            out = subprocess.run(task["grader"].split() + ["--tb=short"],
+                                 cwd=workdir, capture_output=True, text=True,
+                                 env={**os.environ, "PYTHONPATH": workdir},
+                                 timeout=120).stdout
+        except Exception:
+            out = ""
+        finally:
+            subprocess.run(["git", "worktree", "remove", "--force", workdir],
+                           cwd=task["repo"], capture_output=True)
+    fail_cache[task["id"]] = out[-2500:]
+    return fail_cache[task["id"]]
+
 def build_prompt(task):
     sources = "\n\n".join("### %s\n%s" % (f, show(task, f))
                           for f in task["files"])
     return (f"{task['instruction']}\n\nRelevant files:\n{sources}\n\n"
+            f"The test suite currently fails like this:\n"
+            f"{failing_output(task)}\n\n"
             "Answer with a unified diff in a diff code fence, using "
             "exactly the file paths shown above (relative to the "
             "repository root).")
 
 def solve(task):
-    row, reason = None, "no reply"
+    row, reason, feedback = None, "no reply", ""
     for attempt in range(3):
-        reply, served_by = teacher(build_prompt(task))  # parallel: pure waiting
+        reply, served_by = teacher(build_prompt(task) + feedback)
         diff = extract_diff(reply)
         if not reply:
             reason = "empty reply"
@@ -188,6 +236,12 @@ def solve(task):
             row = {"task": task["id"], "teacher": served_by,
                    "prompt": build_prompt(task), "completion": reply}
             break
+        tail = last_test_output.get(task["id"], "")
+        feedback = ("\n\nYour previous diff scored %.2f. " % credit
+                    + ("The test suite then reported:\n%s\n" % tail if tail
+                       else "It did not apply — resend a well-formed "
+                            "unified diff with the exact paths shown. ")
+                    + "Send a corrected, complete diff.")
     with progress_lock:
         done.append(task["id"])
         line = "[%d/%d] %s %s" % (len(done), len(TASKS), task["id"],
