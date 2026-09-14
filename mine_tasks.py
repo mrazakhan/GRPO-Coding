@@ -62,7 +62,8 @@ for line in log:
     else:
         git("branch", "-qD", branch)
 
-train, heldout = tasks[:-HELDOUT], tasks[-HELDOUT:]
+cut = len(tasks) - HELDOUT               # HELDOUT=0: reserve nothing
+train, heldout = tasks[:cut], tasks[cut:]
 with open("tasks.json", "w") as f:
     json.dump(train, f, indent=1)
 with open("heldout_yours.json", "w") as f:

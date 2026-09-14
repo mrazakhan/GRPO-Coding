@@ -22,21 +22,33 @@ def grade(task, diff):
         subprocess.run(["git", "worktree", "add", "--detach", workdir,
                         task["branch"]], cwd=task["repo"],
                        check=True, capture_output=True)
-        applied = subprocess.run(["git", "-C", workdir, "apply", "-"],
-                                 input=diff.encode(), capture_output=True)
-        if applied.returncode != 0:
-            return 0.0                       # gate: the patch did not apply
+        for extra in ([], ["--recount"], ["--3way"]):
+            applied = subprocess.run(["git", "-C", workdir, "apply"] + extra
+                                     + ["-"], input=diff.encode(),
+                                     capture_output=True)
+            if applied.returncode == 0:
+                if extra:
+                    LOG.debug("%s: patch needed git apply %s",
+                              task["id"], extra[0])
+                break
+        if applied.returncode != 0:          # gate: the patch did not apply
+            LOG.info("%s: patch rejected by git apply: %s", task["id"],
+                     applied.stderr.decode(errors="replace").strip()[:200])
+            return 0.0
         out = subprocess.run(task["grader"].split() + ["--tb=no"],
                              cwd=workdir, capture_output=True, text=True,
                              env={**os.environ, "PYTHONPATH": workdir},
                              timeout=120).stdout
         passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", out)) else 0
         failed = int(m.group(1)) if (m := re.search(r"(\d+) failed", out)) else 0
-        if passed + failed == 0:
-            return 0.0                       # gate: no test ever executed
+        if passed + failed == 0:             # gate: no test ever executed
+            LOG.info("%s: grader ran no tests: %s", task["id"],
+                     out.strip()[-200:])
+            return 0.0
         return passed / (passed + failed)
-    except subprocess.TimeoutExpired:
-        return 0.0                           # gate: the grader hung
+    except subprocess.TimeoutExpired:        # gate: the grader hung
+        LOG.info("%s: grader timed out after 120s", task["id"])
+        return 0.0
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", workdir],
                        cwd=task["repo"], capture_output=True)
