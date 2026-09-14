@@ -63,6 +63,20 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                     format="%(asctime)s %(levelname)s %(message)s",
                     datefmt="%H:%M:%S")
 LOG = logging.getLogger("trajectories")
+
+try:
+    from tqdm import tqdm
+except ImportError:                      # optional: bar + ETA when installed
+    tqdm = None
+if tqdm:
+    class _TqdmHandler(logging.Handler):
+        def emit(self, record):
+            tqdm.write(self.format(record))
+    _h = _TqdmHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                                      datefmt="%H:%M:%S"))
+    logging.getLogger().handlers[:] = [_h]  # keep log lines off the bar
+BAR = None
 grade_lock = Lock()
 progress_lock = Lock()
 done = []
@@ -142,9 +156,14 @@ def solve(task):
             break
     with progress_lock:
         done.append(task["id"])
-        print("[%d/%d] %s %s" % (len(done), len(TASKS), task["id"],
-              "kept (attempt %d)" % (attempt + 1) if row
-              else "gave up (last: %s)" % reason), flush=True)
+        line = "[%d/%d] %s %s" % (len(done), len(TASKS), task["id"],
+               "kept (attempt %d)" % (attempt + 1) if row
+               else "gave up (last: %s)" % reason)
+        if BAR:
+            BAR.update(1)
+            tqdm.write(line)
+        else:
+            print(line, flush=True)
     return row
 
 if not os.path.exists("tasks.json"):
@@ -158,8 +177,12 @@ if missing:
 LOG.info("teacher=%s workers=%d tasks=%d out=%s",
          TEACHER_MODEL, WORKERS, len(TASKS), OUT_DIR)
 run_t0 = time.time()
+if tqdm:
+    BAR = tqdm(total=len(TASKS), unit="task", dynamic_ncols=True)
 with ThreadPoolExecutor(max_workers=WORKERS) as pool:
     kept = [r for r in pool.map(solve, TASKS) if r]
+if BAR:
+    BAR.close()
 
 os.makedirs(OUT_DIR, exist_ok=True)
 out_path = os.path.join(OUT_DIR, "trajectories.json")
