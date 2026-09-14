@@ -10,7 +10,8 @@ step; this directory is the runnable form.
     git config --global user.email "you@example.com"   # commits fail without an identity
     git config --global user.name  "you"
     git clone https://github.com/tobymao/sqlglot
-    pip install pytest duckdb pandas && (cd sqlglot && pip install -e .)
+    pip install -r requirements.txt && (cd sqlglot && pip install -e .)
+    pip install -r requirements-gpu.txt   # training machine only (CUDA)
 
 ## Scripts
 

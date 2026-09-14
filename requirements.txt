@@ -1,0 +1,7 @@
+# Steps 1-3 (any machine): task mining, grading, teacher trajectories.
+# The scripts themselves are stdlib-only; these support the SQLGlot test
+# suite the graders run, and the optional progress bar.
+pytest
+duckdb
+pandas
+tqdm
