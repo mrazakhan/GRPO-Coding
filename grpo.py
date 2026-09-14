@@ -68,6 +68,8 @@ trainer = GRPOTrainer(
         learning_rate=float(os.environ.get("LR", "5e-6")),
         num_train_epochs=int(os.environ.get("EPOCHS", "3")),
         logging_steps=1, use_vllm=USE_VLLM,
+        save_steps=int(os.environ.get("SAVE_STEPS", "10")),
+        save_total_limit=2,              # keep last 2 — a late crash keeps one
         output_dir=OUT))
 trainer.train()
 model.save_pretrained(OUT)

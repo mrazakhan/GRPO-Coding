@@ -58,8 +58,11 @@ def recount_hunks(diff):
         old = sum(1 for l in hunk if l[:1] in (" ", "-") or l == "")
         new = sum(1 for l in hunk if l[:1] in (" ", "+") or l == "")
         m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$", header)
-        out.append("@@ -%s,%d +%s,%d @@%s" % (m.group(1), old, m.group(2),
-                                              new, m.group(3)))
+        if m is None:                        # malformed header: pass through
+            out.append(header)
+        else:
+            out.append("@@ -%s,%d +%s,%d @@%s" % (m.group(1), old, m.group(2),
+                                                  new, m.group(3)))
         out.extend(l if l else " " for l in hunk)
         header, hunk = None, []
     for line in diff.splitlines():
@@ -149,12 +152,16 @@ def grade(task, diff):
                        cwd=task["repo"], capture_output=True)
 
 def evaluate(completion_text, task):
-    diff = extract_diff(completion_text)
-    if diff is None:
+    try:                                     # a reward must never raise —
+        diff = extract_diff(completion_text) # one bad completion killed a run
+        if diff is None:
+            return 0.0
+        credit = grade(task, diff)
+        penalty = 0.05 * min(len(diff.splitlines()) / 100, 1.0)
+        return max(credit - penalty, 0.0) if credit > 0 else 0.0
+    except Exception as e:
+        LOG.warning("evaluate() swallowed %s: %s", type(e).__name__, e)
         return 0.0
-    credit = grade(task, diff)
-    penalty = 0.05 * min(len(diff.splitlines()) / 100, 1.0)
-    return max(credit - penalty, 0.0) if credit > 0 else 0.0
 
 import json, os, subprocess, urllib.request
 from concurrent.futures import ThreadPoolExecutor
