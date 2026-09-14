@@ -15,6 +15,20 @@ def extract_diff(text):
     end = text.find(FENCE, start)
     return None if end < 0 else text[start:end].strip("\n")
 
+def restore_blank_context(diff):
+    """Blank context lines inside hunks need their leading space back —
+    models emit them truly empty, and git apply calls that corrupt."""
+    out, in_hunk = [], False
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            in_hunk = True
+        elif line.startswith(("--- ", "+++ ", "diff ", "index ")):
+            in_hunk = False
+        elif in_hunk and line == "":
+            line = " "
+        out.append(line)
+    return "\n".join(out)
+
 def grade(task, diff):
     """Per-test credit in [0, 1]; 0.0 whenever the grader never ran."""
     workdir = tempfile.mkdtemp()
@@ -22,15 +36,19 @@ def grade(task, diff):
         subprocess.run(["git", "worktree", "add", "--detach", workdir,
                         task["branch"]], cwd=task["repo"],
                        check=True, capture_output=True)
-        patch = (diff.rstrip("\n") + "\n").encode()  # git apply requires the
-        for extra in ([], ["--recount"], ["--3way"]):    # final newline
-            applied = subprocess.run(["git", "-C", workdir, "apply"] + extra
-                                     + ["-"], input=patch,
-                                     capture_output=True)
+        variants = [diff, restore_blank_context(diff)]
+        for text in variants:                # git apply requires the
+            patch = (text.rstrip("\n") + "\n").encode()  # final newline
+            for extra in ([], ["--recount"], ["--3way"]):
+                applied = subprocess.run(["git", "-C", workdir, "apply"]
+                                         + extra + ["-"], input=patch,
+                                         capture_output=True)
+                if applied.returncode == 0:
+                    if extra or text is not diff:
+                        LOG.debug("%s: patch needed %s", task["id"],
+                                  " ".join(extra) or "blank-context repair")
+                    break
             if applied.returncode == 0:
-                if extra:
-                    LOG.debug("%s: patch needed git apply %s",
-                              task["id"], extra[0])
                 break
         if applied.returncode != 0:          # gate: the patch did not apply
             LOG.info("%s: patch rejected by git apply: %s", task["id"],
@@ -137,9 +155,12 @@ def show(task, path):
                           capture_output=True, text=True).stdout
 
 def build_prompt(task):
-    sources = "\n\n".join(show(task, f) for f in task["files"])
+    sources = "\n\n".join("### %s\n%s" % (f, show(task, f))
+                          for f in task["files"])
     return (f"{task['instruction']}\n\nRelevant files:\n{sources}\n\n"
-            "Answer with a unified diff in a diff code fence.")
+            "Answer with a unified diff in a diff code fence, using "
+            "exactly the file paths shown above (relative to the "
+            "repository root).")
 
 def solve(task):
     row, reason = None, "no reply"
