@@ -47,7 +47,8 @@ trainer = SFTTrainer(model=model, processing_class=tok,
     train_dataset=Dataset.from_list(rows),
     args=SFTConfig(max_length=MAX_SEQ,   # TRL's own row cap — defaults low
                    per_device_train_batch_size=1, gradient_accumulation_steps=8,
-                   num_train_epochs=3, learning_rate=2e-4,
+                   num_train_epochs=int(os.environ.get("EPOCHS", "3")),
+                   learning_rate=2e-4, logging_steps=1,
                    output_dir="sft-ckpt"))
 trainer = train_on_responses_only(trainer)   # mask the prompt out of the loss
 trainer.train()
