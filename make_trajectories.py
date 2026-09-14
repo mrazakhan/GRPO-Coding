@@ -62,13 +62,15 @@ def teacher(prompt):
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps({"model": TEACHER_MODEL,
+                         "max_tokens": 16384,
                          "messages": [{"role": "user", "content": prompt}]}
                         ).encode(),
         headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
                  "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
         data = json.load(r)
-    return (data["choices"][0]["message"]["content"],
+    message = data["choices"][0]["message"]
+    return (message.get("content") or "",   # reasoning models can send null
             data.get("model", TEACHER_MODEL))
 
 def show(task, path):
@@ -83,21 +85,28 @@ def build_prompt(task):
             "Answer with a unified diff in a diff code fence.")
 
 def solve(task):
-    row = None
+    row, reason = None, "no reply"
     for attempt in range(3):
         reply, served_by = teacher(build_prompt(task))  # parallel: pure waiting
         diff = extract_diff(reply)
+        if not reply:
+            reason = "empty reply"
+            continue
+        if not diff:
+            reason = "no diff fence"
+            continue
         with grade_lock:                       # serialized: touches the repo
-            ok = diff and grade(task, diff) == 1.0
-        if ok:
+            credit = grade(task, diff)
+        reason = "credit %.2f" % credit        # 0.00 usually: diff not applying
+        if credit == 1.0:
             row = {"task": task["id"], "teacher": served_by,
                    "prompt": build_prompt(task), "completion": reply}
             break
     with progress_lock:
         done.append(task["id"])
         print("[%d/%d] %s %s" % (len(done), len(TASKS), task["id"],
-              "kept (attempt %d)" % (attempt + 1) if row else "gave up"),
-              flush=True)
+              "kept (attempt %d)" % (attempt + 1) if row
+              else "gave up (last: %s)" % reason), flush=True)
     return row
 
 TASKS = json.load(open("tasks.json"))
