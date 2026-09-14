@@ -54,6 +54,8 @@ TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "google/gemini-3.8-flash")
 WORKERS = int(os.environ.get("WORKERS", "3"))
 OUT_DIR = os.path.join("runs", TEACHER_MODEL.replace("/", "-"))
 grade_lock = Lock()
+progress_lock = Lock()
+done = []
 
 def teacher(prompt):
     """One chat completion via OpenRouter -> (text, model that served it)."""
@@ -81,18 +83,26 @@ def build_prompt(task):
             "Answer with a unified diff in a diff code fence.")
 
 def solve(task):
+    row = None
     for attempt in range(3):
         reply, served_by = teacher(build_prompt(task))  # parallel: pure waiting
         diff = extract_diff(reply)
         with grade_lock:                       # serialized: touches the repo
             ok = diff and grade(task, diff) == 1.0
         if ok:
-            return {"task": task["id"], "teacher": served_by,
-                    "prompt": build_prompt(task), "completion": reply}
-    return None
+            row = {"task": task["id"], "teacher": served_by,
+                   "prompt": build_prompt(task), "completion": reply}
+            break
+    with progress_lock:
+        done.append(task["id"])
+        print("[%d/%d] %s %s" % (len(done), len(TASKS), task["id"],
+              "kept (attempt %d)" % (attempt + 1) if row else "gave up"),
+              flush=True)
+    return row
 
+TASKS = json.load(open("tasks.json"))
 with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-    kept = [r for r in pool.map(solve, json.load(open("tasks.json"))) if r]
+    kept = [r for r in pool.map(solve, TASKS) if r]
 
 os.makedirs(OUT_DIR, exist_ok=True)
 out_path = os.path.join(OUT_DIR, "trajectories.json")
