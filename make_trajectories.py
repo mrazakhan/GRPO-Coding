@@ -22,13 +22,20 @@ def remap_paths(diff, task):
     names = {}
     for f in task["files"]:
         names.setdefault(os.path.basename(f), []).append(f)
+    def fix(prefix, path):
+        if path == "/dev/null" or path in task["files"]:
+            return prefix + path
+        full = names.get(os.path.basename(path.strip()))
+        return prefix + full[0] if full and len(full) == 1 else prefix + path
     out = []
     for line in diff.splitlines():
         m = re.match(r"^(--- |\+\+\+ )([ab]/)?(.+)$", line)
-        if m and m.group(3) != "/dev/null" and m.group(3) not in task["files"]:
-            full = names.get(os.path.basename(m.group(3).strip()))
-            if full and len(full) == 1:
-                line = m.group(1) + (m.group(2) or "") + full[0]
+        g = re.match(r"^diff --git a/(\S+) b/(\S+)$", line)
+        if m:
+            line = fix(m.group(1) + (m.group(2) or ""), m.group(3))
+        elif g:                       # git trusts this line over ---/+++
+            line = ("diff --git " + fix("a/", g.group(1))
+                    + " " + fix("b/", g.group(2)))
         out.append(line)
     return "\n".join(out)
 
