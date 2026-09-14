@@ -154,6 +154,7 @@ from threading import Lock
 
 TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "anthropic/claude-sonnet-4.5")
 WORKERS = int(os.environ.get("WORKERS", "3"))
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "16384"))
 OUT_DIR = os.path.join("runs", TEACHER_MODEL.replace("/", "-"))
 
 import logging
@@ -185,7 +186,7 @@ def teacher(prompt):
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps({"model": TEACHER_MODEL,
-                         "max_tokens": 16384,
+                         "max_tokens": MAX_TOKENS,
                          "messages": [{"role": "user", "content": prompt}]}
                         ).encode(),
         headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
