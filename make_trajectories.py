@@ -113,7 +113,7 @@ import json, os, subprocess, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
-TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "google/gemini-3.8-flash")
+TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "anthropic/claude-sonnet-4.5")
 WORKERS = int(os.environ.get("WORKERS", "3"))
 OUT_DIR = os.path.join("runs", TEACHER_MODEL.replace("/", "-"))
 
