@@ -22,20 +22,28 @@ def remap_paths(diff, task):
     names = {}
     for f in task["files"]:
         names.setdefault(os.path.basename(f), []).append(f)
-    def fix(prefix, path):
-        if path == "/dev/null" or path in task["files"]:
-            return prefix + path
-        full = names.get(os.path.basename(path.strip()))
-        return prefix + full[0] if full and len(full) == 1 else prefix + path
+    def clean(path):
+        path = re.split(r"\t|\s{2,}", path)[0]     # trailing timestamps
+        return path[:-5] if path.endswith(".orig") else path
+    def fix(path, side):
+        path = clean(path)
+        if path == "/dev/null":
+            return path
+        if path not in task["files"]:
+            full = names.get(os.path.basename(path))
+            if full and len(full) == 1:
+                path = full[0]
+        return side + "/" + path      # -p1 strips one level: a/ or b/ required
     out = []
     for line in diff.splitlines():
-        m = re.match(r"^(--- |\+\+\+ )([ab]/)?(.+)$", line)
+        m = re.match(r"^(---|\+\+\+) ([ab]/)?(.+)$", line)
         g = re.match(r"^diff --git a/(\S+) b/(\S+)$", line)
         if m:
-            line = fix(m.group(1) + (m.group(2) or ""), m.group(3))
+            side = "a" if m.group(1) == "---" else "b"
+            line = m.group(1) + " " + fix(m.group(3), side)
         elif g:                       # git trusts this line over ---/+++
-            line = ("diff --git " + fix("a/", g.group(1))
-                    + " " + fix("b/", g.group(2)))
+            line = ("diff --git " + fix(g.group(1), "a")
+                    + " " + fix(g.group(2), "b"))
         out.append(line)
     return "\n".join(out)
 
