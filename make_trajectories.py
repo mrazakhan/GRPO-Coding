@@ -52,6 +52,7 @@ from threading import Lock
 
 TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "google/gemini-3.8-flash")
 WORKERS = int(os.environ.get("WORKERS", "3"))
+OUT_DIR = os.path.join("runs", TEACHER_MODEL.replace("/", "-"))
 grade_lock = Lock()
 
 def teacher(prompt):
@@ -92,3 +93,9 @@ def solve(task):
 
 with ThreadPoolExecutor(max_workers=WORKERS) as pool:
     kept = [r for r in pool.map(solve, json.load(open("tasks.json"))) if r]
+
+os.makedirs(OUT_DIR, exist_ok=True)
+out_path = os.path.join(OUT_DIR, "trajectories.json")
+with open(out_path, "w") as f:
+    json.dump(kept, f)
+print(len(kept), "trajectories written to", out_path)
