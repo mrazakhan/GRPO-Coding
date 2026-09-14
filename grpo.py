@@ -25,6 +25,7 @@ TASKS = json.load(open(os.environ.get("TASKS_FILE", "tasks.json")))
 MAX_SEQ = int(os.environ.get("MAX_SEQ", "12288"))
 MAX_COMPLETION = int(os.environ.get("MAX_COMPLETION", "2048"))
 USE_VLLM = os.environ.get("USE_VLLM", "0") == "1"
+OUT = os.environ.get("OUT", "grpo-ckpt")
 
 from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
@@ -67,8 +68,8 @@ trainer = GRPOTrainer(
         learning_rate=float(os.environ.get("LR", "5e-6")),
         num_train_epochs=int(os.environ.get("EPOCHS", "3")),
         logging_steps=1, use_vllm=USE_VLLM,
-        output_dir="grpo-ckpt"))
+        output_dir=OUT))
 trainer.train()
-model.save_pretrained("grpo-ckpt")
-tok.save_pretrained("grpo-ckpt")
-print("adapter saved to grpo-ckpt/", flush=True)
+model.save_pretrained(OUT)
+tok.save_pretrained(OUT)
+print("adapter saved to %s/" % OUT, flush=True)

@@ -18,7 +18,8 @@ if len(kept) < 5:
     raise SystemExit("only %d trajectories in %s — mine more tasks "
                      "(WANTED=50 python mine_tasks.py) before spending GPU "
                      "time" % (len(kept), TRAJ))
-print("training on %d trajectories from %s" % (len(kept), TRAJ), flush=True)
+OUT = os.environ.get("OUT", "sft-ckpt")
+print("training on %d trajectories from %s -> %s" % (len(kept), TRAJ, OUT), flush=True)
 
 MAX_SEQ = int(os.environ.get("MAX_SEQ", "20480"))  # prompts carry
 # whole source files plus the grader's failing output — 4096 truncates
@@ -49,9 +50,9 @@ trainer = SFTTrainer(model=model, processing_class=tok,
                    per_device_train_batch_size=1, gradient_accumulation_steps=8,
                    num_train_epochs=int(os.environ.get("EPOCHS", "3")),
                    learning_rate=2e-4, logging_steps=1,
-                   output_dir="sft-ckpt"))
+                   output_dir=OUT))
 trainer = train_on_responses_only(trainer)   # mask the prompt out of the loss
 trainer.train()
-model.save_pretrained("sft-ckpt")
-tok.save_pretrained("sft-ckpt")
-print("adapter saved to sft-ckpt/", flush=True)
+model.save_pretrained(OUT)
+tok.save_pretrained(OUT)
+print("adapter saved to %s/" % OUT, flush=True)
