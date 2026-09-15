@@ -31,6 +31,7 @@ from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 from trl import GRPOConfig, GRPOTrainer
 from datasets import Dataset
+import prof
 
 model, tok = FastLanguageModel.from_pretrained(
     os.environ.get("SFT_CKPT", "sft-ckpt"),
@@ -71,7 +72,9 @@ trainer = GRPOTrainer(
         save_steps=int(os.environ.get("SAVE_STEPS", "10")),
         save_total_limit=2,              # keep last 2 — a late crash keeps one
         output_dir=OUT))
+trainer.add_callback(prof.StepProfiler("grpo"))
 trainer.train()
+prof.summarize("grpo")
 model.save_pretrained(OUT)
 tok.save_pretrained(OUT)
 print("adapter saved to %s/" % OUT, flush=True)
