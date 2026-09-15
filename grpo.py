@@ -22,8 +22,8 @@ def load_defs():
 
 mt = load_defs()                         # build_prompt, extract_diff, evaluate
 TASKS = json.load(open(os.environ.get("TASKS_FILE", "tasks.json")))
-MAX_SEQ = int(os.environ.get("MAX_SEQ", "12288"))
-MAX_COMPLETION = int(os.environ.get("MAX_COMPLETION", "2048"))
+MAX_SEQ = int(os.environ.get("MAX_SEQ", "8192"))
+MAX_COMPLETION = int(os.environ.get("MAX_COMPLETION", "1024"))
 USE_VLLM = os.environ.get("USE_VLLM", "0") == "1"
 OUT = os.environ.get("OUT", "grpo-ckpt")
 
@@ -63,7 +63,7 @@ trainer = GRPOTrainer(
     args=GRPOConfig(
         per_device_train_batch_size=int(os.environ.get("BATCH", "1")),
         gradient_accumulation_steps=int(os.environ.get("ACCUM", "4")),
-        num_generations=int(os.environ.get("NUM_GEN", "8")),
+        num_generations=int(os.environ.get("NUM_GEN", "4")),
         max_prompt_length=MAX_SEQ - MAX_COMPLETION,
         max_completion_length=MAX_COMPLETION,
         learning_rate=float(os.environ.get("LR", "5e-6")),
