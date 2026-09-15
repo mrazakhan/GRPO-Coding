@@ -81,8 +81,25 @@ for ckpt in CKPTS:
     if "/" not in ckpt and not os.path.exists(ckpt):
         print("%s: not found, skipping (train it first)" % ckpt, flush=True)
         continue
-    model, tok = FastLanguageModel.from_pretrained(
-        ckpt, max_seq_length=MAX_SEQ, load_in_4bit=True)
+    if os.path.isdir(ckpt) and not os.path.exists(
+            os.path.join(ckpt, "adapter_config.json")):
+        # a run still in progress leaves checkpoint-N/ but no root adapter
+        subs = sorted((d for d in os.listdir(ckpt)
+                       if d.startswith("checkpoint-")),
+                      key=lambda d: int(d.split("-")[1]))
+        if subs:
+            ckpt = os.path.join(ckpt, subs[-1])   # newest intermediate
+            print("using latest checkpoint %s" % ckpt, flush=True)
+        else:
+            print("%s: no finished adapter yet, skipping" % ckpt, flush=True)
+            continue
+    try:
+        model, tok = FastLanguageModel.from_pretrained(
+            ckpt, max_seq_length=MAX_SEQ, load_in_4bit=True)
+    except Exception as e:
+        print("%s: could not load (%s), skipping"
+              % (ckpt, type(e).__name__), flush=True)
+        continue
     tok = get_chat_template(tok, chat_template="qwen-2.5")
     FastLanguageModel.for_inference(model)
     for split in SPLITS:
