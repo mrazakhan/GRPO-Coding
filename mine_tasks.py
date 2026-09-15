@@ -6,6 +6,9 @@ import subprocess
 REPO = os.path.abspath("sqlglot")
 WANTED = int(os.environ.get("WANTED", "30"))
 HELDOUT = int(os.environ.get("HELDOUT", "5"))
+# reject tasks whose source files are too big to fit the model's
+# context — a whole-file prompt over this many chars can't be seen
+MAX_SRC_CHARS = int(os.environ.get("MAX_SRC_CHARS", "40000"))
 
 def git(*args):
     return subprocess.run(["git", "-C", REPO, *args],
@@ -39,6 +42,11 @@ for line in log:
     test = [f for f in files if f.startswith("tests/")]
     if not (1 <= len(src) <= 2 and 1 <= len(test) <= 2):
         continue                       # not the one-fix-plus-its-tests shape
+    size = sum(len(git("show", sha + ":" + f).stdout) for f in src)
+    if size > MAX_SRC_CHARS:
+        print("      skip %s: source %d chars > %d (won't fit context)"
+              % (sha[:8], size, MAX_SRC_CHARS))
+        continue
     branch = "task-%02d" % (len(tasks) + 1)
     git("checkout", "-q", "-B", branch, sha)
     if git("revert", "--no-commit", sha).returncode != 0:
