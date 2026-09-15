@@ -1,8 +1,8 @@
 """One comparison table across algorithms: held-out mean-credit and pass
 rate from runs/eval/results.jsonl, median step time and peak VRAM from
-runs/profile/<algo>.jsonl. Run after the eval so the rows are populated.
+runs/profile/<algo>.jsonl. Columns auto-size to their contents.
 
-  python report.py            # optionally FAMILY=1p5b to filter labels
+  python report.py            # optionally FAMILY=1p5b to filter by label
 """
 import json
 import os
@@ -30,13 +30,29 @@ def prof(algo):
     return {"steps": len(rows), "median_s": t[len(t) // 2],
             "peak_gb": max(r["peak_vram_gb"] for r in rows)}
 
-print("\n%-14s %-12s %-12s %-10s %-12s %s" % ("checkpoint", "mean-credit",
-      "pass", "steps", "median s/step", "peak VRAM GB"))
-for (ckpt, split), r in evals().items():
-    algo = ("grpo" if "grpo" in ckpt else "dpo" if "dpo" in ckpt
-            else "ppo" if "ppo" in ckpt else "")
-    pr = prof(algo) if algo else None
-    print("%-14s %-12.3f %-12.2f %-10s %-12s %s" % (
-        ckpt, r.get("mean_credit", 0.0), r["pass_rate"],
-        pr["steps"] if pr else "-", ("%.1f" % pr["median_s"]) if pr else "-",
-        ("%.2f" % pr["peak_gb"]) if pr else "-"))
+def grid(headers, data):
+    widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data
+              else len(headers[i]) for i in range(len(headers))]
+    fmt = "  ".join("%-" + str(w) + "s" for w in widths)
+    print(fmt % tuple(headers))
+    print(fmt % tuple("-" * w for w in widths))
+    for row in data:
+        print(fmt % tuple(row))
+
+def algo_of(ckpt):
+    for a in ("grpo", "dpo", "ppo", "sft"):
+        if a in ckpt:
+            return a
+    return ""
+
+data = []
+for (ckpt, split), r in sorted(evals().items()):
+    a = algo_of(ckpt)
+    pr = prof(a) if a in ("grpo", "dpo", "ppo") else None
+    data.append([ckpt, "%.3f" % r.get("mean_credit", 0.0),
+                 "%.2f" % r["pass_rate"],
+                 str(pr["steps"]) if pr else "-",
+                 "%.1f" % pr["median_s"] if pr else "-",
+                 "%.2f" % pr["peak_gb"] if pr else "-"])
+grid(["checkpoint", "mean-credit", "pass", "steps", "median s/step",
+      "peak VRAM GB"], data)

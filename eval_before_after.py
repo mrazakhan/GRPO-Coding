@@ -39,17 +39,26 @@ def record(row):
     with open(RESULTS, "a") as f:
         f.write(json.dumps(row) + "\n")
 
+def _grid(headers, data):
+    widths = [max(len(headers[i]), *(len(row[i]) for row in data)) if data
+              else len(headers[i]) for i in range(len(headers))]
+    fmt = "  ".join("%-" + str(w) + "s" for w in widths)
+    print("\n" + fmt % tuple(headers))
+    print(fmt % tuple("-" * w for w in widths))
+    for row in data:
+        print(fmt % tuple(row))
+
 def print_table():
     rows = [json.loads(l) for l in open(RESULTS)] if os.path.exists(RESULTS) else []
     latest = {}
     for r in rows:                       # last measurement per (ckpt, split)
         latest[(r["ckpt"], r["split"])] = r
-    print("\n%-38s %-20s %-6s %-11s %-7s %s" % ("checkpoint", "split",
-          "pass", "mean-credit", "tokens", "trained at / label"))
-    for (ckpt, split), r in latest.items():
-        print("%-38s %-20s %-6.2f %-11.3f %-7.0f %s %s" % (ckpt, split,
-              r["pass_rate"], r.get("mean_credit", 0.0), r["mean_tokens"],
-              r.get("ckpt_mtime", ""), r.get("label", "")))
+    data = [[ckpt, split, "%.2f" % r["pass_rate"],
+             "%.3f" % r.get("mean_credit", 0.0), "%.0f" % r["mean_tokens"],
+             ("%s %s" % (r.get("ckpt_mtime", ""), r.get("label", ""))).strip()]
+            for (ckpt, split), r in latest.items()]
+    _grid(["checkpoint", "split", "pass", "mean-credit", "tokens",
+           "trained at / label"], data)
 
 MAX_SEQ = int(os.environ.get("MAX_SEQ", "20480"))  # prompts carry
 # whole source files plus the grader's failing output — 4096 truncates
@@ -96,9 +105,9 @@ for ckpt in CKPTS:
                "mean_tokens": round(mean(lengths), 1),
                "at": time.strftime("%Y-%m-%d %H:%M:%S")}
         record(row)
-        print("%-40s %-22s pass %.2f  mean-credit %.3f  tokens %.0f"
-              % (ckpt, split, row["pass_rate"], row["mean_credit"],
-                 row["mean_tokens"]), flush=True)
+        print("  %-42s pass %.2f  mean-credit %.3f  tokens %.0f"
+              % (ckpt + " / " + split, row["pass_rate"],
+                 row["mean_credit"], row["mean_tokens"]), flush=True)
 
 print_table()
 print("\nrows saved to %s" % RESULTS)
