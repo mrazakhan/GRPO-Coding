@@ -29,6 +29,7 @@ from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
 from datasets import Dataset
+import prof
 
 model, tok = FastLanguageModel.from_pretrained(
     os.environ.get("BASE_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
@@ -52,7 +53,9 @@ trainer = SFTTrainer(model=model, processing_class=tok,
                    learning_rate=2e-4, logging_steps=1,
                    output_dir=OUT))
 trainer = train_on_responses_only(trainer)   # mask the prompt out of the loss
+trainer.add_callback(prof.StepProfiler("sft"))
 trainer.train()
+prof.summarize("sft")
 model.save_pretrained(OUT)
 tok.save_pretrained(OUT)
 print("adapter saved to %s/" % OUT, flush=True)

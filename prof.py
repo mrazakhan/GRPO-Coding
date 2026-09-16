@@ -19,8 +19,8 @@ class StepProfiler(TrainerCallback):
         self.algo = algo
         os.makedirs(PROF_DIR, exist_ok=True)
         self.path = os.path.join(PROF_DIR, algo + ".jsonl")
-        open(self.path, "w").close()     # fresh per run
         self.t0 = None
+        self._fresh = True               # truncate on first completed step
 
     def on_step_begin(self, args, state, control, **kw):
         if torch.cuda.is_available():
@@ -31,7 +31,8 @@ class StepProfiler(TrainerCallback):
         dt = time.time() - self.t0 if self.t0 else 0.0
         peak = torch.cuda.max_memory_allocated() / 1e9 \
             if torch.cuda.is_available() else 0.0
-        with open(self.path, "a") as f:
+        with open(self.path, "w" if self._fresh else "a") as f:
+            self._fresh = False
             f.write(json.dumps({"algo": self.algo, "step": state.global_step,
                                 "step_seconds": round(dt, 2),
                                 "peak_vram_gb": round(peak, 2)}) + "\n")
