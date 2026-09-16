@@ -29,6 +29,7 @@ CKPTS = [c.strip() for c in os.environ.get(
 SPLITS = [s.strip() for s in os.environ.get(
     "SPLITS", "heldout_yours.json").split(",") if s.strip()]
 ROLLS = int(os.environ.get("ROLLS", "10"))
+SEED = int(os.environ.get("SEED", "0"))
 
 RESULTS = os.path.join("runs", "eval", "results.jsonl")
 
@@ -102,6 +103,10 @@ for ckpt in CKPTS:
         continue
     tok = get_chat_template(tok, chat_template="qwen-2.5")
     FastLanguageModel.for_inference(model)
+    import random as _random
+    _random.seed(SEED)
+    __import__("torch").manual_seed(SEED)
+    __import__("torch").cuda.manual_seed_all(SEED)
     for split in SPLITS:
         rates, partials, lengths = [], [], []
         for task in json.load(open(split)):
