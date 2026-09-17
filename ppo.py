@@ -81,8 +81,9 @@ for step in range(PPO_STEPS):
         for _ in range(K):
             out = model.generate(pids.unsqueeze(0), max_new_tokens=MAX_COMPLETION,
                                  do_sample=True, temperature=0.8, top_p=0.95)
-            gens.append(out[0].detach())
-            texts.append(tok.decode(out[0][plen:], skip_special_tokens=True))
+            seq = out[0].tolist()            # plain list: not an inference tensor
+            gens.append(seq)
+            texts.append(tok.decode(seq[plen:], skip_special_tokens=True))
     rewards = torch.tensor([mt.evaluate(t, task) for t in texts])
     if float(rewards.std()) < 1e-6:          # no gradient in this group
         prof_cb.on_step_end(None, _S(step), None)
@@ -92,13 +93,15 @@ for step in range(PPO_STEPS):
     adv = (rewards - rewards.mean())
     adv = (adv / (adv.std() + 1e-6)).to(dev)
     with torch.no_grad():
-        old_lp = torch.stack([completion_logprob(g, plen) for g in gens])
+        old_lp = torch.stack([completion_logprob(
+            torch.tensor(g, device=dev, dtype=torch.long), plen) for g in gens])
     last = 0.0
     for _ in range(INNER):
         opt.zero_grad()
         loss = 0.0
         for i, g in enumerate(gens):
-            new_lp = completion_logprob(g, plen)
+            new_lp = completion_logprob(
+                torch.tensor(g, device=dev, dtype=torch.long), plen)
             ratio = torch.exp(new_lp - old_lp[i])
             loss = loss - torch.min(ratio * adv[i],
                                     torch.clamp(ratio, 1 - CLIP, 1 + CLIP) * adv[i])
